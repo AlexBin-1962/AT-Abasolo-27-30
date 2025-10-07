@@ -596,28 +596,22 @@ body, html { overflow-x: hidden; }
           </div>
         </header>
 
-        <div class="sr-badges">
-          <span class="sr-badge">Análisis Territorial</span>
-          <span class="sr-badge">Campo</span>
-          <span class="sr-badge">Ganar Todo</span>
+      <div class="sr-kpis">
+        <div class="sr-kpi">
+          <span class="sr-kpi-label">Top secciones foco</span>
+          <span id="kpi-top" class="sr-kpi-value">12</span>   <!-- ⬅️ ID -->
         </div>
-
-        <div class="sr-kpis">
-          <div class="sr-kpi">
-            <span class="sr-kpi-label">Top secciones foco</span>
-            <span class="sr-kpi-value">12</span>
-          </div>
-          <div class="sr-kpi">
-            <span class="sr-kpi-label">Margen &lt; 3%</span>
-            <span class="sr-kpi-value">8</span>
-          </div>
-          <div class="sr-kpi">
-            <span class="sr-kpi-label">Abstención alta</span>
-            <span class="sr-kpi-value">15</span>
-          </div>
+        <div class="sr-kpi">
+          <span class="sr-kpi-label">Margen &lt; 3%</span>
+          <span id="kpi-m3" class="sr-kpi-value">8</span>     <!-- ⬅️ ID -->
         </div>
+        <div class="sr-kpi">
+          <span class="sr-kpi-label">Abstención alta</span>
+          <span id="kpi-abst" class="sr-kpi-value">15</span>  <!-- ⬅️ ID -->
+        </div>
+      </div>
 
-        <div class="sr-progress">
+      <div class="sr-progress">
           <span class="sr-prog-label">Ruta 2027</span>
           <div class="sr-prog-bar"><i style="width: 64%"></i></div>
           <span class="sr-prog-num">64%</span>
@@ -1067,6 +1061,56 @@ body, html { overflow-x: hidden; }
   })();
 </script>
 
+  <script>
+  (function(){
+    // Formateo simple
+    const fmt = (n)=> new Intl.NumberFormat('es-MX').format(Math.max(0, Math.round(n||0)));
+
+    // Animación de conteo
+    function countTo(el, to, ms=500){
+      const from = parseInt((el.textContent||'0').replace(/\D/g,'')) || 0;
+      const start = performance.now();
+      const dur = Math.max(0, ms);
+      function tick(t){
+        const p = Math.min(1, (t - start)/dur);
+        el.textContent = fmt(from + (to - from)*p);
+        if(p < 1) requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    }
+
+    // Set de KPIs + progreso
+    function setKPIs({ topSecciones, margenMenor3, abstAlta, rutaPorc }){
+      // Elementos (con fallback si no pusiste IDs)
+      const elTop  = document.getElementById('kpi-top')  || document.querySelector('.sr-kpis .sr-kpi:nth-child(1) .sr-kpi-value');
+      const elM3   = document.getElementById('kpi-m3')   || document.querySelector('.sr-kpis .sr-kpi:nth-child(2) .sr-kpi-value');
+      const elAbst = document.getElementById('kpi-abst') || document.querySelector('.sr-kpis .sr-kpi:nth-child(3) .sr-kpi-value');
+      const bar    = document.querySelector('.sr-prog-bar i');
+      const num    = document.querySelector('.sr-prog-num');
+
+      if(elTop)  countTo(elTop,  Number(topSecciones||0), 600);
+      if(elM3)   countTo(elM3,   Number(margenMenor3||0), 600);
+      if(elAbst) countTo(elAbst, Number(abstAlta||0),     600);
+
+      const p = Math.max(0, Math.min(100, Number(rutaPorc||0)));
+      if(bar) bar.style.width = p + '%';
+      if(num) num.textContent = p + '%';
+    }
+
+    // Exponer a global por si llamas desde tu lógica de consultas
+    window.ATKPI = { set: setKPIs };
+
+    // 🔵 RELLENO RÁPIDO (DF 2 DEMO): reemplaza con tus valores reales
+    // Ejemplo: 10 secciones foco, 7 con margen <3%, 14 con abstención alta, avance 68%
+    setKPIs({ topSecciones: 10, margenMenor3: 7, abstAlta: 14, rutaPorc: 68 });
+
+    // Opcional: actualizar cuando ejecutes la consulta principal (si tienes un botón)
+    document.getElementById('btn-ejecutar')?.addEventListener('click', ()=>{
+      // Llama aquí con tus números calculados:
+      // ATKPI.set({ topSecciones: X, margenMenor3: Y, abstAlta: Z, rutaPorc: R });
+    });
+  })();
+  </script>
 
 
 </body>
