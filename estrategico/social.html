@@ -359,38 +359,56 @@
 
 
 
-      async function renderSocFicha(sec){
-        const card = document.getElementById('SOCF_card');
-        if (!card) return;                   // por si el HTML aún no se pegó
-        await ensureSocLoaded();
+    async function renderSocFicha(sec, ln2024){
+      const card = document.getElementById('SOCF_card');
+      if (!card) return;
+      await ensureSocLoaded();
 
-          const key = SOCF.idNorm ? SOCF.idNorm(sec) : String(sec||'');
-          const row = SOCF.bySec.get(key);
-        if (!row){
-          card.style.display = 'block';
-          card.querySelectorAll('.v').forEach(v => v.textContent = '—');
-          return;
-        }
+      // Normaliza key
+      const key = String(parseInt(String(sec||'').trim(), 10));
+      const row = SOCF.bySec.get(key);
 
-        // KPIs
-        document.getElementById('SOCF_pob').textContent   = fmt(row.POB_TOTAL);
-        document.getElementById('SOCF_pob_18mas').textContent   = fmt(row.POB_18MAS);
-        document.getElementById('SOCF_analf').textContent = fmt(row.TASA_ANALF_15MAS, ' %');
-        document.getElementById('SOCF_desemp').textContent= fmt(row.TASA_DESEMP, ' %');
+      const FMT = (n, suf='') => (n==null||isNaN(n)) ? '—' : Number(n).toLocaleString('es-MX') + suf;
 
-        // Servicios por mil hab.
-        document.getElementById('SOCF_ele').textContent   = fmt(row.SERV_ELECTRICIDAD_PMH);
-        document.getElementById('SOCF_agua').textContent  = fmt(row.SERV_AGUA_PMH);
-        document.getElementById('SOCF_dre').textContent   = fmt(row.SERV_DRENAJE_PMH);
-        document.getElementById('SOCF_net').textContent   = fmt(row.SERV_INTERNET_PMH);
-        document.getElementById('SOCF_cel').textContent   = fmt(row.SERV_CEL_PMH);
-        document.getElementById('SOCF_pc').textContent    = fmt(row.SERV_PC_PMH);
-
+      if(!row){
         card.style.display = 'block';
+        card.querySelectorAll('.v').forEach(v => v.textContent = '—');
+        return;
       }
 
+      // --- KPI base (2020)
+      const P18_2020 = Number(row.POB_18MAS||0);
+            // --- Proyección 2027 usando LN-2024 como ancla
+      const LN_2024 = Number(ln2024 || 0);
+      let pob18_2027 = null;
+      if (P18_2020 > 0 && LN_2024 > 0){
+        const ratio_2020_2024 = LN_2024 / P18_2020;      // crecimiento efectivo 4 años
+        const factor_7yrs     = Math.pow(ratio_2020_2024, 7/4); // 2020->2027
+        pob18_2027 = Math.round(P18_2020 * factor_7yrs);
+      }
+      document.getElementById('SOCF_pob').textContent   = FMT(row.POB_TOTAL||0);
+      document.getElementById('SOCF_pob_18mas').textContent   = fmt(row.POB_18MAS);
+      document.getElementById('SOCF_pob18_2027').textContent = FMT(pob18_2027);
+      document.getElementById('SOCF_analf').textContent = FMT(row.TASA_ANALF_15MAS||0, ' %');
+      document.getElementById('SOCF_desemp').textContent= FMT(row.TASA_DESEMP||0, ' %');
+
+      // --- Servicios por mil hab. (2020)
+      document.getElementById('SOCF_ele').textContent = FMT(row.SERV_ELECTRICIDAD_PMH);
+      document.getElementById('SOCF_agua').textContent= FMT(row.SERV_AGUA_PMH);
+      document.getElementById('SOCF_dre').textContent = FMT(row.SERV_DRENAJE_PMH);
+      document.getElementById('SOCF_net').textContent = FMT(row.SERV_INTERNET_PMH);
+      document.getElementById('SOCF_cel').textContent = FMT(row.SERV_CEL_PMH);
+      document.getElementById('SOCF_pc').textContent  = FMT(row.SERV_PC_PMH);
 
 
+      
+
+      card.style.display = 'block';
+    }
+
+
+
+      
 
 
   // ===== 1) Mapa único y chequeo =====
@@ -596,6 +614,34 @@
     box.__wired = true;
   })();
 
+function __num(v){ return Number(String(v ?? '').replace(/,/g,'').trim()) || 0; }
+
+function getLN2024(props){
+    if(!props) return 0;
+
+    // 1) candidatos conocidos (ajusta o agrega si usas otro)
+    const exact = [
+      '24DL_LN','24A_LN','LN_2024','LN24','LISTA_NOMINAL_2024',
+      '24_DL_LN','24LN','LN' // deja 'LN' al final por si lo usas genérico
+    ];
+    for(const k of exact){
+      if (k in props && String(props[k]).trim()!=='') return __num(props[k]);
+    }
+
+    // 2) patrones comunes: "algo con LN y 2024", o "lista nominal 2024"
+    for (const [k,v] of Object.entries(props)){
+      if (/LN.*2024/i.test(k) || /LISTA.*NOM/i.test(k)) return __num(v);
+    }
+
+    // 3) último recurso: el mayor valor numérico en claves con "LN"
+    let best = 0;
+    for (const [k,v] of Object.entries(props)){
+      if (/LN/i.test(k)) best = Math.max(best, __num(v));
+    }
+    return best;
+  }
+
+
   async function showSectionInfo(feat){
     ensureSecInfoPanelWired();
     const p = feat.properties || {};
@@ -615,8 +661,11 @@
     document.getElementById('si-dl').textContent  = dl;
     document.getElementById('si-ln').textContent  = ln;
     box.style.display = 'block';
-    await renderSocFicha(sec);
-
+    const lnSec = getLN2024(feat?.properties);
+    
+    await renderSocFicha(sec, lnSec);
+    // al final de showSectionInfo(feat)…
+     
   }
 
 
@@ -1457,6 +1506,11 @@ function getDlListFromCatalog(feats){
 
       <div class="row"><span class="k">Población total (2020)</span>     <span class="v" id="SOCF_pob">—</span></div>
       <div class="row"><span class="k">Población 18+</span>     <span class="v" id="SOCF_pob_18mas">—</span></div>
+      <div class="row">
+        <span class="k">Población 18+ (2027, proj)</span>
+        <span class="v" id="SOCF_pob18_2027">—</span>
+      </div>
+
       <div class="row"><span class="k">% Analfabetismo (15+)</span><span class="v" id="SOCF_analf">—</span></div>
       <div class="row"><span class="k">% Desempleo (12+)</span>   <span class="v" id="SOCF_desemp">—</span></div>
 
