@@ -1764,17 +1764,31 @@
 
         // --- UI refs ---
         const $ = (sel) => document.querySelector(sel);
-        const launcher = $("#estrategico-campo-launcher");
+        // Preferimos el botón real '#btn-campo'; si no existe, fallback a selector previo
+        const launcher = document.getElementById("btn-campo") ||
+          $("#estrategico-campo-launcher");
         const panel = $("#estrategico-campo-panel");
         const btnCerrar = $("#ec-btn-cerrar");
         const tabs = document.querySelectorAll(".ec-tab");
         const tabCaptura = $("#ec-tab-captura");
         const tabAdmin = $("#ec-tab-admin");
 
-        // --- Init ---
-        updateCounter();
-        redrawLayer();
-        wireUI();
+        // --- Init (deferred until DOM esté listo) ---
+        function startCampoModule() {
+          try {
+            updateCounter();
+            redrawLayer();
+            wireUI();
+          } catch (e) {
+            console.warn("Error inicializando módulo CAMPO:", e);
+          }
+        }
+
+        if (document.readyState === "loading") {
+          document.addEventListener("DOMContentLoaded", startCampoModule, { once: true });
+        } else {
+          startCampoModule();
+        }
 
         function renderKpis() {
           const box = document.getElementById("ec-kpis");
@@ -1907,7 +1921,8 @@
           safeOn(btnCerrar, "click", () => panel.classList.add("ec-hidden"));
 
           // Tabs
-          if (tabs && Array.isArray(tabs)) {
+          // tabs es un NodeList; comprobamos longitud en lugar de Array.isArray
+          if (tabs && tabs.length) {
             tabs.forEach((t) =>
               safeOn(t, "click", () => {
                 tabs.forEach((x) => x.classList.remove("ec-tab-active"));
@@ -2392,7 +2407,17 @@
       })();
 
       const launcher = document.getElementById("btn-campo");
-      launcher.addEventListener("click", togglePanelCampo);
+      if (launcher) {
+        launcher.addEventListener("click", (e) => {
+          try {
+            const sel = launcher.getAttribute("data-target") || "#estrategico-campo-panel";
+            const pnl = document.querySelector(sel);
+            if (pnl) pnl.classList.toggle("ec-hidden");
+          } catch (err) {
+            console.warn("toggle panel failed:", err);
+          }
+        });
+      }
 
       // === Drag del panel CT (por header) ===
       function enableDragPanel(
