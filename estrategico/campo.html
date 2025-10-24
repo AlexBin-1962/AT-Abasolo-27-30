@@ -1625,7 +1625,18 @@
             <label>Nombre</label>
             <input id="ec-nombre" placeholder="Nombre completo" />
           </div>
+        </div>
 
+        <!-- NUEVO: Teléfono -->
+        <div class="ec-field">
+          <label>Teléfono</label>
+          <input
+            id="ec-telefono"
+            type="tel"
+            inputmode="tel"
+            placeholder="10 dígitos"
+            maxlength="14"
+          />
         </div>
 
         <div class="ec-grid2">
@@ -1638,6 +1649,10 @@
             <input id="ec-ambito" placeholder="MUN / DF / DL (opcional)" />
           </div>
         </div>
+
+        <input type="hidden" id="ec-dl" />
+        <input type="hidden" id="ec-df" />
+        <input type="hidden" id="ec-muni" />
 
         <div class="ec-captura-modos">
           <button id="ec-gps" class="ec-btn">📍 GPS</button>
@@ -1690,9 +1705,6 @@
           la URL RAW.</small
         >
       </div>
-      <input type="hidden" id="ec-dl" />
-      <input type="hidden" id="ec-df" />
-      <input type="hidden" id="ec-muni" />
     </div>
 
     <script>
@@ -1711,6 +1723,7 @@
           document.getElementById("ec-ambito") ||
           document.getElementById("si-ambito") ||
           document.querySelector('[name="ambito"]'),
+
         dom:
           document.getElementById("ec-domicilio") ||
           document.getElementById("ec-dom") ||
@@ -1765,7 +1778,8 @@
         // --- UI refs ---
         const $ = (sel) => document.querySelector(sel);
         // Preferimos el botón real '#btn-campo'; si no existe, fallback a selector previo
-        const launcher = document.getElementById("btn-campo") ||
+        const launcher =
+          document.getElementById("btn-campo") ||
           $("#estrategico-campo-launcher");
         const panel = $("#estrategico-campo-panel");
         const btnCerrar = $("#ec-btn-cerrar");
@@ -1785,7 +1799,9 @@
         }
 
         if (document.readyState === "loading") {
-          document.addEventListener("DOMContentLoaded", startCampoModule, { once: true });
+          document.addEventListener("DOMContentLoaded", startCampoModule, {
+            once: true,
+          });
         } else {
           startCampoModule();
         }
@@ -2103,46 +2119,59 @@
           return { type: "Feature", geometry: geom, properties: props };
         }
 
+        // Lectura segura de inputs por ID (string vacío si no existe)
+        function v(id) {
+          return (document.getElementById(id)?.value || "").trim();
+        }
+        function dnum(id) {
+          return parseFloat(document.getElementById(id)?.value || "");
+        }
+        function dset(id, key) {
+          return document.getElementById(id)?.dataset?.[key];
+        }
+
+        function normalizePhone(s) {
+          const d = (s || "").replace(/\D+/g, "");
+          return d.length >= 10 ? d : ""; // o exige 10 si lo prefieres
+        }
+
         function onGuardar() {
-          const tipo = (el.tipo.value || "").toUpperCase();
-          const seccion = (el.seccion.value || "").trim();
-          const ambito = (el.ambito.value || "").trim();
-          const lat = parseFloat(el.seccion.dataset.lat || "");
-          const lng = parseFloat(el.seccion.dataset.lng || "");
-          const obs = (el.obs.value || "").trim();
+          // Helpers cortos
+          const v = (id) => (document.getElementById(id)?.value || "").trim();
+          const dset = (id, key) => document.getElementById(id)?.dataset?.[key];
+          const telefonoRaw = v('ec-telefono');   // lectura cruda del input
 
-          // Nuevos campos (ocultos o visibles)
-          const dl = (document.getElementById("ec-dl")?.value || "").trim();
-          const df = (document.getElementById("ec-df")?.value || "").trim();
-          const muni = (document.getElementById("ec-muni")?.value || "").trim();
+          const now = new Date().toISOString();
+          const tipo = (v("ec-tipo") || "OTRO").toUpperCase();
 
-          // Dirección (si ya tienes estos IDs; si cambian, dime y lo ajusto)
-          const nombres = (
-            document.getElementById("ec-nombres")?.value || ""
-          ).trim();
-          const apellidos = (
-            document.getElementById("ec-apellidos")?.value || ""
-          ).trim();
-          const calle = (
-            document.getElementById("ec-calle")?.value || ""
-          ).trim();
-          const numero = (
-            document.getElementById("ec-numero")?.value || ""
-          ).trim();
-          const colonia = (
-            document.getElementById("ec-colonia")?.value || ""
-          ).trim();
-          const ciudad = (
-            document.getElementById("ec-ciudad")?.value || ""
-          ).trim();
-          const cp = (document.getElementById("ec-cp")?.value || "").trim();
+          // Tu UI actual
+          const nombre = v("ec-nombre"); // un solo campo
+          const telefono = normalizePhone(telefonoRaw);
 
-          if (!tipo || Number.isNaN(lat) || Number.isNaN(lng)) {
-            alert("Falta tipo y/o ubicación (GPS/Mapa/Domicilio).");
+          const seccion = v("ec-seccion");
+          const ambito = v("ec-ambito");
+          const dl = v("ec-dl");
+          const df = v("ec-df");
+          const muni = v("ec-muni");
+
+          const lat = parseFloat(dset("ec-seccion", "lat") || "");
+          const lng = parseFloat(dset("ec-seccion", "lng") || "");
+
+          const dom = v("ec-dom"); // domicilio en un campo
+          const obs = v("ec-obs");
+
+          // Validaciones mínimas
+          if (!isFinite(lat) || !isFinite(lng)) {
+            alert("Falta ubicar el punto (GPS / Mapa / Geocodificar).");
+            return;
+          }
+          if (!seccion) {
+            alert(
+              "No se detectó la SECCIÓN. Asegúrate de fijar el punto dentro de una sección."
+            );
             return;
           }
 
-          const now = new Date().toISOString();
           const feature = {
             type: "Feature",
             properties: {
@@ -2151,50 +2180,44 @@
               ORIGEN: "CT-27",
               ESTATUS: "ACTIVO",
 
-              // Rol y datos básicos del ciudadano
-              TIPO: tipo, // SIMPATIZANTE/LIDER/ADVERSARIO/RC/RG/OBS/OTRO
-              NOMBRES: nombres,
-              APELLIDOS: apellidos,
+              // Rol y datos básicos
+              TIPO: tipo,
+              NOMBRE: nombre, // (singular, como tu UI)
               TELEFONO: telefono,
+              DOMICILIO: dom,
 
-              // Ubicación administrativa para ET-27
+              // Ámbito para ET-27
               SECCION: seccion,
               DISTRITO_L: dl,
               DISTRITO_F: df,
               MUNICIPIO: muni,
-              AMBITO: ambito, // si lo usas como display “MUN:… · DL:… · DF:…”
-
-              // Dirección opcional (si la capturó el promotor)
-              CALLE: calle,
-              NUMERO: numero,
-              COLONIA: colonia,
-              CIUDAD: ciudad,
-              CP: cp,
+              AMBITO: ambito,
 
               // Observaciones
               OBS: obs,
             },
-
             geometry: { type: "Point", coordinates: [lng, lat] },
           };
 
-          registros.push(feature);
-          saveLocal(registros);
-          updateCounter();
+          // Persistir y refrescar
+          (window.registros = window.registros || []).push(feature);
+          saveLocal(window.registros);
           redrawLayer();
+          updateCounter();
 
-          // Notificar a ET-27 si está abierto (o para QA en tiempo real)
+          // Notificar a ET-27 (una sola vez)
           window.dispatchEvent(
             new CustomEvent("ct27:recordSaved", { detail: feature })
           );
 
-          // Reset ubicación para evitar duplicados por error:
-          delete el.seccion.dataset.lat;
-          delete el.seccion.dataset.lng;
+          // Limpiar datasets de coords para evitar duplicados por error
+          const elSeccion = document.getElementById("ec-seccion");
+          if (elSeccion) {
+            delete elSeccion.dataset.lat;
+            delete elSeccion.dataset.lng;
+          }
+
           toast("Registro guardado localmente.");
-          window.dispatchEvent(
-            new CustomEvent("ct27:recordSaved", { detail: feature })
-          );
         }
 
         function renderKpis() {
@@ -2229,11 +2252,12 @@
           <small style="color:#666">Últimos: ${ultimos.join(" · ")}</small>
         `;
         }
-
         function updateCounter() {
-          const elTotal = document.getElementById("ec-contador");
+          const elTotal =
+            document.querySelector(".ec-contador") ||
+            document.getElementById("ec-contador");
           if (elTotal) elTotal.textContent = (window.registros || []).length;
-          renderKpis();
+          if (typeof renderKpis === "function") renderKpis();
         }
 
         function redrawLayer() {
@@ -2343,9 +2367,6 @@
         function saveLocal(arr) {
           localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
         }
-        function updateCounter() {
-          el.contador.textContent = registros.length;
-        }
 
         // --- Helpers ---
         function toast(msg) {
@@ -2410,7 +2431,9 @@
       if (launcher) {
         launcher.addEventListener("click", (e) => {
           try {
-            const sel = launcher.getAttribute("data-target") || "#estrategico-campo-panel";
+            const sel =
+              launcher.getAttribute("data-target") ||
+              "#estrategico-campo-panel";
             const pnl = document.querySelector(sel);
             if (pnl) pnl.classList.toggle("ec-hidden");
           } catch (err) {
