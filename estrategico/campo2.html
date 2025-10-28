@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>App de Campo - Captura de Datos</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    html, body, #map {
+      height: 100%;
+      margin: 0;
+    }
+    .leaflet-popup-content {
+      font-size: 14px;
+    }
+    .form-popup {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      width: 300px;
+    }
+    .form-popup h3 {
+      margin-top: 10px;
+      margin-bottom: 4px;
+      font-size: 16px;
+      border-bottom: 1px solid #ccc;
+    }
+    input, select, textarea, button {
+      padding: 6px;
+      font-size: 14px;
+      border: 1px solid #ccc;
+      border-radius: 4px;
+    }
+    label::before {
+      content: attr(data-icon) ' ';
+    }
+    #mensaje-confirmacion, #mensaje-error {
+      position: fixed;
+      top: 10px;
+      right: 10px;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 1000;
+      display: none;
+    }
+    #mensaje-confirmacion {
+      background-color: #4CAF50;
+      color: white;
+    }
+    #mensaje-error {
+      background-color: #f44336;
+      color: white;
+    }
+  </style>
+</head>
+<body>
+  <div id="map"></div>
+  <button onclick="ubicarUsuario()" style="position:absolute;top:10px;left:10px;z-index:1000;padding:6px 12px;background-color:#007bff;color:#fff;border:none;border-radius:4px;">📍 Ubicarme</button>
+  <div id="mensaje-confirmacion">✅ Dato guardado correctamente</div>
+  <div id="mensaje-error">⚠️ Por favor completa todos los campos obligatorios</div>
+
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    const map = L.map('map').setView([21.1219, -101.6827], 13);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '© OpenStreetMap contributors'
+    }).addTo(map);
+
+    fetch('AT_Leon.geojson')
+      .then(response => response.json())
+      .then(data => {
+        L.geoJSON(data, {
+          onEachFeature: function (feature, layer) {
+            const props = feature.properties;
+            layer.on('click', function () {
+              const content = `
+                <strong>Sección:</strong> ${props.SECCION || 'N/D'}<br>
+                <strong>Distrito F:</strong> ${props.DISTRITO_F || 'N/D'}<br>
+                <strong>Distrito L:</strong> ${props.DISTRITO_L || 'N/D'}`;
+              layer.bindPopup(content).openPopup();
+            });
+          }
+        }).addTo(map);
+      });
+
+    function ubicarUsuario() {
+      if (!navigator.geolocation) {
+        alert("Geolocalización no disponible.");
+        return;
+      }
+
+      navigator.geolocation.getCurrentPosition(position => {
+        const lat = position.coords.latitude;
+        const lng = position.coords.longitude;
+
+        const formHtml = `
+          <form onsubmit="guardarDato(event, ${lat}, ${lng})" class="form-popup">
+            <h3>📄 Datos Personales</h3>
+            <label data-icon="👤" for="nombre">Nombre *</label>
+            <input type="text" id="nombre" required>
+            <label data-icon="👤" for="paterno">Apellido paterno *</label>
+            <input type="text" id="paterno" required>
+            <label data-icon="👤" for="materno">Apellido materno</label>
+            <input type="text" id="materno">
+            <label data-icon="📞" for="telefono">Teléfono *</label>
+            <input type="tel" id="telefono" required>
+
+            <h3>📍 Ubicación</h3>
+            <label data-icon="🏠" for="calle">Calle *</label>
+            <input type="text" id="calle" required>
+            <label data-icon="🔢" for="numero">Número *</label>
+            <input type="text" id="numero" required>
+            <label data-icon="📡" for="zona">Tipo de zona</label>
+            <select id="zona">
+              <option value="">--Selecciona--</option>
+              <option>Urbana</option>
+              <option>Rural</option>
+              <option>Marginada</option>
+              <option>Conurbada</option>
+            </select>
+            <label data-icon="📶" for="cobertura">¿Cobertura celular?</label>
+            <select id="cobertura">
+              <option>Sí</option>
+              <option>No</option>
+            </select>
+
+            <h3>🗳️ Clasificación</h3>
+            <label data-icon="🏷️" for="tipo">Tipo *</label>
+            <select id="tipo" required>
+              <option value="">--Selecciona--</option>
+              <option>Simpatizante</option>
+              <option>Casilla</option>
+              <option>Liderazgo</option>
+              <option>Activista rival</option>
+            </select>
+            <label data-icon="🎯" for="prioridad">Nivel de prioridad</label>
+            <select id="prioridad">
+              <option>Alta</option>
+              <option>Media</option>
+              <option>Baja</option>
+            </select>
+            <label data-icon="🧭" for="influencia">Categoría de influencia</label>
+            <select id="influencia">
+              <option>Zona clave</option>
+              <option>Zona volátil</option>
+              <option>Zona consolidada</option>
+            </select>
+
+            <h3>📸 Foto / Evidencia</h3>
+            <input type="file" accept="image/*" capture="environment">
+
+            <h3>📝 Observaciones</h3>
+            <textarea id="observaciones" rows="2" placeholder="🎤 Puedes dictar tocando el micrófono del teclado..."></textarea>
+
+            <h3>🌐 Sistema</h3>
+            <label>Latitud</label><input type="text" readonly value="${lat.toFixed(6)}">
+            <label>Longitud</label><input type="text" readonly value="${lng.toFixed(6)}">
+            <label>Fecha</label><input type="text" readonly value="${new Date().toLocaleString()}">
+
+            <button type="submit">Guardar</button>
+            <button type="button" onclick="map.closePopup()">Cancelar</button>
+          </form>
+        `;
+
+        L.marker([lat, lng]).addTo(map).bindPopup(formHtml).openPopup();
+        map.setView([lat, lng], 16);
+      });
+    }
+
+    function guardarDato(e, lat, lng) {
+      e.preventDefault();
+      // Aquí iría la lógica de guardado a futuro
+      mostrarMensaje('confirmacion');
+      map.closePopup();
+    }
+
+    function mostrarMensaje(tipo) {
+      const ok = document.getElementById('mensaje-confirmacion');
+      const error = document.getElementById('mensaje-error');
+      if (tipo === 'confirmacion') {
+        ok.style.display = 'block';
+        setTimeout(() => ok.style.display = 'none', 3000);
+      } else {
+        error.style.display = 'block';
+        setTimeout(() => error.style.display = 'none', 3000);
+      }
+    }
+  </script>
+</body>
+</html>

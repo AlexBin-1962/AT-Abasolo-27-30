@@ -59,7 +59,7 @@
 
       /* === Botón CAMPO integrado al panel lateral === */
       .btn-campo {
-        background: linear-gradient(90deg, #7b1b2b 0%, #a53850 100%);
+        background: linear-gradient(90deg, #09b7ce 0%, #0c8d8d 100%);
         color: #fff;
         font-weight: 600;
         border: none;
@@ -75,7 +75,7 @@
       .btn-campo:hover {
         transform: translateY(-2px);
         box-shadow: 0 4px 10px rgba(0, 0, 0, 0.35);
-        background: linear-gradient(90deg, #8f243a 0%, #b94a62 100%);
+        background: linear-gradient(90deg, #0c8d8d 0%, #09b7ce 100%);
       }
       .btn-campo i {
         margin-right: 6px;
@@ -341,13 +341,13 @@
       }
       .ec-btn {
         border: 1px solid #ddd;
-        background: #fafafa;
+        background: #f0f2f5;
         padding: 8px 10px;
         border-radius: 10px;
         cursor: pointer;
       }
       .ec-primary {
-        background: #7b1b2b;
+        background: #4a90e2;
         color: #fff;
         border: none;
       }
@@ -621,15 +621,20 @@
       function matches(props, u) {
         if (u.scope === "ALL") return true;
         const keyField =
-          u.scope === "MUN" ? FIELD_KEYS.mun : u.scope === "DL" ? FIELD_KEYS.dl : FIELD_KEYS.df;
+          u.scope === "MUN"
+            ? FIELD_KEYS.mun
+            : u.scope === "DL"
+            ? FIELD_KEYS.dl
+            : FIELD_KEYS.df;
         return toComp(props?.[keyField]) === toComp(u.key);
       }
       function filterGeojson(geojson, u) {
         if (u.scope === "ALL") return geojson;
-        const features = (geojson.features || []).filter((f) => matches(f.properties, u));
+        const features = (geojson.features || []).filter((f) =>
+          matches(f.properties, u)
+        );
         return { ...geojson, features };
       }
-
 
       // ====== CARGA ELECTORAL (para obtener 24DL_LN) ======
       function getPaths() {
@@ -1669,6 +1674,11 @@
         <div class="ec-actions">
           <button id="ec-guardar" class="ec-primary">Guardar registro</button>
           <button id="ec-export" class="ec-secondary">Enviar</button>
+          <small
+            id="ec-export-name"
+            style="align-self: center; margin-left: 8px; color: #556"
+            >puntos_campo_no-pin_YYYYMMDD.geojson</small
+          >
           <button id="ec-copiar" class="ec-secondary">
             Descargar Capturas
           </button>
@@ -1701,9 +1711,15 @@
           <input id="ec-admin-pins" placeholder="2701,1234" />
         </div>
         <div class="ec-actions">
-          <button id="ec-admin-save-pins" class="ec-primary">Guardar PINs</button>
+          <button id="ec-admin-save-pins" class="ec-primary">
+            Guardar PINs
+          </button>
         </div>
-        <small>Escribe uno o varios PINs separados por coma. El PIN con el que se ingrese se registrará en cada punto como <code>PROMOTOR_PIN</code>.</small>
+        <small
+          >Escribe uno o varios PINs separados por coma. El PIN con el que se
+          ingrese se registrará en cada punto como
+          <code>PROMOTOR_PIN</code>.</small
+        >
         <small
           >Tip: publica <code>puntos_campo.geojson</code> en tu repo y pega aquí
           la URL RAW.</small
@@ -1747,13 +1763,47 @@
         adminUrl: document.getElementById("ec-admin-url"),
         adminCargar: document.getElementById("ec-admin-cargar"),
         adminLimpiar: document.getElementById("ec-admin-limpiar"),
-    adminPins: document.getElementById("ec-admin-pins"),
-    adminSavePins: document.getElementById("ec-admin-save-pins"),
+        adminPins: document.getElementById("ec-admin-pins"),
+        adminSavePins: document.getElementById("ec-admin-save-pins"),
 
         // Contador / KPIs
         contador: document.getElementById("ec-contador") ||
           document.getElementById("ct-contador") || { textContent: "" },
       };
+
+      // HEYTI: solo etiquetas de botones (no cambia lógica ni handlers)
+      (() => {
+        const btnCopiar = document.getElementById("ec-copiar");
+        if (btnCopiar) {
+          btnCopiar.textContent = "Copiar GeoJSON";
+          btnCopiar.title = "Copia el GeoJSON al portapapeles";
+        }
+        const btnExport = document.getElementById("ec-export");
+        if (btnExport) {
+          btnExport.textContent = "Descargar GeoJSON";
+          btnExport.title = "Descarga un archivo .geojson con tus puntos";
+        }
+      })();
+
+      // HEYTI: máscara en vivo para teléfono MX (10 dígitos)
+      if (el?.telefono) {
+        el.telefono.addEventListener("input", () => {
+          const d = el.telefono.value.replace(/\D+/g, "").slice(0, 10);
+          let f = d;
+          if (d.length > 6)
+            f = `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}`;
+          else if (d.length > 3) f = `${d.slice(0, 3)} ${d.slice(3)}`;
+          el.telefono.value = f;
+        });
+        el.telefono.addEventListener("paste", (e) => {
+          e.preventDefault();
+          const d = (e.clipboardData.getData("text") || "")
+            .replace(/\D+/g, "")
+            .slice(0, 10);
+          el.telefono.value = d;
+          el.telefono.dispatchEvent(new Event("input"));
+        });
+      }
 
       /* =======================
     ESTRATEGICO · Módulo CAMPO
@@ -1761,7 +1811,9 @@
     ======================= */
       const E27Campo = (() => {
         // --- Config ---
-        const STORAGE_KEY = "estrategico_campo_registros_v1";
+        // Base key; las claves finales serán BASE_STORAGE_KEY_{PIN} para aislar
+        // capturas por promotor. Si no hay PIN activo se usa la clave base.
+        const BASE_STORAGE_KEY = "estrategico_campo_registros_v1";
         const LAYER_ID = "estrategico-campo-layer";
         const colorByTipo = {
           SIMPATIZANTE: "#1e88e5", // azul
@@ -1775,11 +1827,34 @@
           OTRO: "#000000", // negro
         };
 
-  // --- Estado ---
-  let registros = loadLocal();
-  // Mantener referencia global para herramientas externas y debugging
-  window.registros = registros;
+        // --- Estado ---
+        let registros = loadLocal();
+        // Mantener referencia global para herramientas externas y debugging
+        window.registros = registros;
         let pickingOnMap = false;
+        // Catálogo territorial (municipios)
+        let municipioCatalog = {};
+        async function loadCatalogoTerritorial() {
+          try {
+            const resp = await fetch("data/catalogo_territorial.json", {
+              cache: "no-store",
+            });
+            const j = await resp.json();
+            municipioCatalog = j.municipios || j.municipios || {};
+          } catch (e) {
+            console.warn("No se pudo cargar catalogo_territorial.json:", e);
+            municipioCatalog = {};
+          }
+        }
+        function getMunicipioName(code) {
+          if (!code && code !== 0) return "";
+          const k = String(code || "").replace(/^0+/, "") || String(code);
+          return (
+            municipioCatalog[k] ||
+            municipioCatalog[String(code)] ||
+            String(code || "")
+          );
+        }
         const layerGroup = L.layerGroup().addTo(atMap());
         layerGroup._estrategicoId = LAYER_ID;
 
@@ -1801,6 +1876,18 @@
             updateCounter();
             redrawLayer();
             wireUI();
+            // Cargar catálogo territorial (para nombre de municipio)
+            try {
+              loadCatalogoTerritorial();
+            } catch (e) {
+              /* noop */
+            }
+            // actualizar nombre de archivo de export visible
+            try {
+              setExportFilenameUI();
+            } catch (e) {
+              /* noop */
+            }
           } catch (e) {
             console.warn("Error inicializando módulo CAMPO:", e);
           }
@@ -1832,6 +1919,29 @@
           return null;
         }
 
+        // Forzar mayúsculas en ciertos inputs (visual + valor real)
+        function enforceUppercaseOn(el) {
+          if (!el) return;
+          // visual
+          el.style.textTransform = "uppercase";
+          const onInput = (e) => {
+            try {
+              const start = el.selectionStart;
+              const end = el.selectionEnd;
+              const up = el.value.toUpperCase();
+              if (up !== el.value) el.value = up;
+              // Restaurar caret si es posible
+              if (typeof start === "number" && typeof end === "number") {
+                el.setSelectionRange(start, end);
+              }
+            } catch (err) {
+              // algunos elementos (p. ej. no-input) pueden fallar
+            }
+          };
+          el.addEventListener("input", onInput);
+          el.addEventListener("blur", onInput);
+        }
+
         function setUbicacionFormAuto({ lat, lng }) {
           const $seccion = document.getElementById("ec-seccion");
           const $ambito = document.getElementById("ec-ambito");
@@ -1839,6 +1949,10 @@
           const $df = document.getElementById("ec-df");
           const $muni = document.getElementById("ec-muni");
           if (!$seccion || !$ambito) return null;
+
+          // Guardamos las coordenadas en el dataset del elemento
+          $seccion.dataset.lat = lat;
+          $seccion.dataset.lng = lng;
 
           const feat = findSectionFeatureForPoint(lat, lng);
           if (feat) {
@@ -1942,10 +2056,37 @@
 
           // Panel administrativo
           safeOn(el.adminCargar, "click", adminCargarGeoJSON);
-          safeOn(el.adminLimpiar, "click", () => {
-            layerGroup?.clearLayers();
-            redrawLayer?.();
+          // HEYTI: limpiar capa + selección + recentrar mapa
+          safeOn?.(el?.adminLimpiar, "click", () => {
+            try {
+              layerGroup?.clearLayers?.();
+            } catch {}
+            try {
+              // limpiar dataset lat/lng del selector de sección
+              if (el?.seccion) {
+                delete el.seccion.dataset.lat;
+                delete el.seccion.dataset.lng;
+              }
+            } catch {}
+            try {
+              // remover pin si existe en el mapa
+              const m = atMap?.();
+              const pin = document.getElementById("ct-pin");
+              if (m && pin && pin._leaflet_id) m.removeLayer(pin);
+            } catch {}
+            try {
+              // recentrar a MX
+              const m = atMap?.();
+              m?.setView?.([23.6345, -102.5528], 5);
+            } catch {}
+            try {
+              redrawLayer?.();
+            } catch {}
+            try {
+              toast?.("Capa y selección limpiadas.");
+            } catch {}
           });
+
           // Guardar PINs (admin)
           safeOn(el.adminSavePins, "click", () => {
             const v = el.adminPins?.value?.trim() || "";
@@ -1957,6 +2098,16 @@
             localStorage.setItem("CT27_PIN", v);
             toast("PINs guardados.");
           });
+
+          // Forzar mayúsculas en los campos de texto relevantes
+          try {
+            enforceUppercaseOn(document.getElementById("ec-nombre"));
+            enforceUppercaseOn(document.getElementById("ec-dom"));
+            enforceUppercaseOn(document.getElementById("ec-ambito"));
+            enforceUppercaseOn(document.getElementById("ec-obs"));
+          } catch (e) {
+            console.warn("No se pudieron aplicar mayúsculas a inputs:", e);
+          }
         }
 
         function activarPickEnMapa() {
@@ -2084,6 +2235,7 @@
             DISTRITO_L: dl,
             DISTRITO_F: df,
             MUNICIPIO: muni,
+            MUNICIPIO_NOMBRE: getMunicipioName(muni),
 
             NOMBRES: nombres,
             APELLIDOS: apellidos,
@@ -2128,13 +2280,13 @@
           // Helpers cortos
           const v = (id) => (document.getElementById(id)?.value || "").trim();
           const dset = (id, key) => document.getElementById(id)?.dataset?.[key];
-          const telefonoRaw = v('ec-telefono');   // lectura cruda del input
+          const telefonoRaw = v("ec-telefono"); // lectura cruda del input
 
           const now = new Date().toISOString();
           const tipo = (v("ec-tipo") || "OTRO").toUpperCase();
 
           // Tu UI actual
-          const nombre = v("ec-nombre"); // un solo campo
+          const nombre = (v("ec-nombre") || "").toUpperCase(); // un solo campo (forzar mayúsculas)
           const telefono = normalizePhone(telefonoRaw);
 
           // Validación: si el usuario escribió algo pero la normalización no
@@ -2152,8 +2304,8 @@
           const lat = parseFloat(dset("ec-seccion", "lat") || "");
           const lng = parseFloat(dset("ec-seccion", "lng") || "");
 
-          const dom = v("ec-dom"); // domicilio en un campo
-          const obs = v("ec-obs");
+          const dom = (v("ec-dom") || "").toUpperCase(); // domicilio (mayúsculas)
+          const obs = (v("ec-obs") || "").toUpperCase();
 
           // Validaciones mínimas
           if (!isFinite(lat) || !isFinite(lng)) {
@@ -2181,13 +2333,17 @@
               TELEFONO: telefono,
               DOMICILIO: dom,
               // PIN del promotor que abrió el módulo (si existe)
-              PROMOTOR_PIN: sessionStorage.getItem("CT27_PROMOTOR_PIN") || window.CT27_PROMOTOR_PIN || null,
+              PROMOTOR_PIN:
+                sessionStorage.getItem("CT27_PROMOTOR_PIN") ||
+                window.CT27_PROMOTOR_PIN ||
+                null,
 
               // Ámbito para ET-27
               SECCION: seccion,
               DISTRITO_L: dl,
               DISTRITO_F: df,
               MUNICIPIO: muni,
+              MUNICIPIO_NOMBRE: getMunicipioName(muni),
               AMBITO: ambito,
 
               // Observaciones
@@ -2283,13 +2439,10 @@
         function popupHtml(f) {
           const p = f.properties || {};
           return `
-        <div style="min-width:220px">
-          <div><strong>${p.TIPO || "-"}</strong></div>
-          <div>${p.NOMBRE || ""}</div>
-          <div>${p.TELEFONO || ""}</div>
-          <div>Sección: ${p.SECCION || "-"}</div>
-          <div>Ámbito: ${p.AMBITO || "-"}</div>
-          <div style="color:#666">${p.OBS || ""}</div>
+        <div style="min-width:200px">
+          <div><strong>Nombre:</strong> ${p.NOMBRE || "-"}</div>
+          <div><strong>Teléfono:</strong> ${p.TELEFONO || "-"}</div>
+          <div><strong>Tipo de Asignación:</strong> ${p.TIPO || "-"}</div>
           <div style="font-size:11px;color:#888">Creado: ${
             p.CREATED_AT || ""
           }</div>
@@ -2304,10 +2457,42 @@
           });
           const url = URL.createObjectURL(blob);
           const a = document.createElement("a");
-          a.download = "puntos_campo.geojson";
+          // Nombre que incorpora el PIN activo y la fecha para evitar sobrescrituras
+          const pin =
+            sessionStorage.getItem("CT27_PROMOTOR_PIN") ||
+            window.CT27_PROMOTOR_PIN ||
+            "no-pin";
+          const fecha = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+          a.download = `puntos_campo_${pin}_${fecha}.geojson`;
           a.href = url;
           a.click();
           URL.revokeObjectURL(url);
+        }
+
+        // Devuelve el nombre que usará la exportación (sin crear el blob)
+        function getExportFilename() {
+          const pin =
+            sessionStorage.getItem("CT27_PROMOTOR_PIN") ||
+            window.CT27_PROMOTOR_PIN ||
+            "no-pin";
+          const fecha = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+          return `puntos_campo_${pin}_${fecha}.geojson`;
+        }
+
+        function setExportFilenameUI() {
+          try {
+            const el = document.getElementById("ec-export-name");
+            if (!el) return;
+            el.textContent = getExportFilename();
+          } catch (e) {
+            /* noop */
+          }
+          // Actualizar nombre de export visible
+          try {
+            setExportFilenameUI();
+          } catch (e) {
+            /* noop */
+          }
         }
 
         function onCopiar() {
@@ -2358,16 +2543,69 @@
         }
 
         // --- Persistencia ---
+        // Key de almacenamiento según PIN activo. Si no hay PIN se usa la
+        // clave base (comportamiento histórico).
+        function getStorageKeyForActivePin() {
+          try {
+            const pin =
+              sessionStorage.getItem("CT27_PROMOTOR_PIN") ||
+              window.CT27_PROMOTOR_PIN ||
+              null;
+            if (pin) return `${BASE_STORAGE_KEY}_${String(pin)}`;
+            return BASE_STORAGE_KEY; // coordinador / sin PIN
+          } catch (e) {
+            return BASE_STORAGE_KEY;
+          }
+        }
+
         function loadLocal() {
           try {
-            return JSON.parse(localStorage.getItem(STORAGE_KEY)) || [];
+            const key = getStorageKeyForActivePin();
+            return JSON.parse(localStorage.getItem(key)) || [];
           } catch {
             return [];
           }
         }
+
         function saveLocal(arr) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(arr));
+          const key = getStorageKeyForActivePin();
+          localStorage.setItem(key, JSON.stringify(arr));
         }
+
+        // Permite recargar registros cuando cambia el PIN activo
+        function reloadRegistrosForActivePin() {
+          registros = loadLocal();
+          window.registros = registros;
+          redrawLayer();
+          updateCounter();
+          // Actualizar badge del launcher si existe
+          try {
+            const btn = document.getElementById("btn-campo");
+            if (btn) {
+              const n = (registros || []).length;
+              btn.innerHTML = ` <i class="fa fa-map-marker-alt"></i>  Módulo CAMPO
+        ${
+          n > 0
+            ? `<span style="
+          background:#fff;color:#4a90e2;font-weight:700;
+          margin-left:6px;padding:2px 8px;border-radius:10px;
+          font-size:13px;">${n}</span>`
+            : ""
+        }`;
+            }
+          } catch (e) {
+            /* noop */
+          }
+        }
+
+        // Escuchar evento que indica cambio de PIN (emitted por pinGateSafe)
+        window.addEventListener("ct27:pinChanged", () => {
+          try {
+            reloadRegistrosForActivePin();
+          } catch (e) {
+            console.warn("ct27:pinChanged handler failed:", e);
+          }
+        });
 
         // --- Helpers ---
         function toast(msg) {
@@ -2429,7 +2667,13 @@
                 sessionStorage.setItem("CT27_PROMOTOR_PIN", matched);
                 sessionStorage.setItem("CT27_UNLOCK", "1");
                 modal.style.display = "none";
-                toast("Acceso concedido.");
+                // Avisamos al módulo CAMPO que cambió el PIN para recargar datos
+                try {
+                  window.dispatchEvent(new Event("ct27:pinChanged"));
+                } catch (e) {
+                  console.warn("No se pudo dispatch ct27:pinChanged", e);
+                }
+                alert("Acceso concedido");
               } else {
                 alert("PIN incorrecto");
               }
