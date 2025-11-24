@@ -254,6 +254,11 @@
         font-size: 12px;
         color: #475569;
       }
+
+      .pers-item.pers-active {
+        box-shadow: 0 0 0 2px #f97316;
+      }
+
       .badge {
         padding: 2px 8px;
         border-radius: 10px;
@@ -1005,6 +1010,15 @@
       ); // tu JSON plano agrupado por sección
       const URL_ETPTS = getPath("et27", null); // opcional: puntos capturados en CAMPO (si aún no los tienes, déjalo null)
 
+      function getET27PointsURL() {
+        // 1) prioridad a lo que venga en AT_PATHS.et27 si existe
+        const paths = getPaths();
+        if (paths.et27) return paths.et27;
+
+        // 2) fallback fijo al archivo de la app
+        return ET27_POINTS_URL || "data/campo/puntos_campo.geojson";
+      }
+
       /** 1) Ruta del GeoJSON de puntos */
       const ET27_POINTS_URL = "data/campo/puntos_campo.geojson";
 
@@ -1012,16 +1026,115 @@
 
       // ====== CACHE ======
       let __ET_CAS_POR_SEC = null; // Map sec -> { req_rep, casillas:[{CASILLA,LOCALIDAD,DOMICILIO}] }
-      let __ET_PERS_INDEX = null; // Map sec -> { rep_casilla:[], rep_seccion:[], coord_distrito:[], otros:[] }
+
+      // Índice global de personas ET: siempre usamos el mismo objeto en window y en la variable local
+      window.__ET_PERS_INDEX = window.__ET_PERS_INDEX || null;
+      let __ET_PERS_INDEX = window.__ET_PERS_INDEX; // alias local al global
+
       let __SECC_INDEX = null; // Map sec -> feature de secciones (para DL/muni)
       let ET27_CAPTURE_MODE = null; // { pid, secId, li }
       const ET27_MARKERS_BY_PID = new Map();
+
+      window.ET27_EDITS = window.ET27_EDITS || new Map();
 
       // ====== HELPERS ======
       async function fetchJSON(u) {
         const r = await fetch(u);
         if (!r.ok) throw new Error(u);
         return r.json();
+      }
+
+      function focusET27Person(pid, secId, li) {
+        const map = ensureLeafletMap();
+        const secKey = String(secId);
+
+        let persona = null;
+
+        // 1) Intentar primero la persona asociada al <li>
+        if (li && li.__persona) {
+          persona = li.__persona;
+        }
+
+        // 2) Si no viene del <li>, buscar en el índice por sección
+        if (!persona && window.__ET_PERS_INDEX) {
+          const bucket = window.__ET_PERS_INDEX.get(secKey);
+          if (bucket) {
+            const listas = [
+              bucket.rep_casilla,
+              bucket.rep_seccion,
+              bucket.coord_distrito,
+              bucket.otros,
+            ];
+            for (const arr of listas) {
+              if (!arr) continue;
+              const found = arr.find(
+                (x) =>
+                  x.id === pid ||
+                  x.ID_PERSONA === pid ||
+                  (x._pid && x._pid === pid)
+              );
+              if (found) {
+                persona = found;
+                break;
+              }
+            }
+          }
+        }
+
+        if (!persona) return;
+
+        // 3) Resolver coordenadas (persona → dataset del <li> como respaldo)
+        let lat = persona.lat ?? persona.LAT ?? null;
+        let lng = persona.lng ?? persona.LNG ?? null;
+
+        if ((lat == null || lng == null) && li && li.dataset) {
+          if (li.dataset.lat && li.dataset.lng) {
+            lat = parseFloat(li.dataset.lat);
+            lng = parseFloat(li.dataset.lng);
+          }
+        }
+
+        if (lat == null || lng == null || isNaN(lat) || isNaN(lng)) {
+          alert(
+            "Esta persona aún no tiene ubicación en el mapa. Usa el botón 📍Mapa para capturarla."
+          );
+          return;
+        }
+
+        // Guardar de vuelta por si luego se usa en otro lado
+        persona.lat = lat;
+        persona.lng = lng;
+
+        // 4) Asegurarnos de tener marcador y centrar
+        addOrUpdatePersonMarker(pid, secKey, persona);
+        const marker = ET27_MARKERS_BY_PID.get(pid);
+        if (!marker) return;
+
+        const latlng = marker.getLatLng();
+        map.setView(latlng, Math.max(map.getZoom(), 19), { animate: true });
+
+        // Resaltar visualmente el marcador con un halo rojo temporal
+        try {
+          const iconEl = marker.getElement ? marker.getElement() : marker._icon;
+          if (iconEl) {
+            const originalBoxShadow = iconEl.style.boxShadow || "";
+            iconEl.style.transition = "box-shadow 0.25s ease";
+            iconEl.style.boxShadow = "0 0 0 6px rgba(220, 38, 38, 0.7)";
+
+            setTimeout(() => {
+              iconEl.style.boxShadow = originalBoxShadow;
+            }, 1200);
+          }
+        } catch (_) {}
+
+        // 5) Feedback visual
+        marker.openPopup?.();
+        try {
+          document
+            .querySelectorAll(".pers-item.pers-active")
+            .forEach((el) => el.classList.remove("pers-active"));
+          if (li) li.classList.add("pers-active");
+        } catch (_) {}
       }
 
       function startET27CaptureForPerson(pid, secId, li) {
@@ -1089,27 +1202,50 @@
       }
       function bucketPersonasET(points) {
         const m = new Map();
+
         (points?.features || []).forEach((f) => {
           const p = f.properties || {};
           const sec = String(p.SECCION ?? p.SEC ?? "").trim();
           if (!sec) return;
 
-          // 👉 ahora también consideramos p.TIPO
+          // Tipo / rol normalizado
           const tipoRaw = (
             p.TIPO_ASIGNACION ||
             p.ROL ||
-            p.TIPO || // SIMPATIZANTE, LIDER, OBSERVADOR, REP_CASILLA, REP_GENERAL, etc.
+            p.TIPO || // SIMPATIZANTE, LIDER, OBSERVADOR, REP_CASILLA, etc.
             ""
           )
             .toUpperCase()
             .trim();
 
-          // Persona normalizada (soporta mayúsculas y minúsculas)
+          // Coordenadas desde geometría o campos auxiliares
+          let lat = null;
+          let lng = null;
+
+          if (f.geometry && Array.isArray(f.geometry.coordinates)) {
+            // GeoJSON: [lon, lat]
+            lng = f.geometry.coordinates[0];
+            lat = f.geometry.coordinates[1];
+          }
+          if (p.LAT != null && p.LON != null) {
+            lat = Number(p.LAT);
+            lng = Number(p.LON);
+          }
+          if (p.lat != null && p.lng != null) {
+            lat = Number(p.lat);
+            lng = Number(p.lng);
+          }
+
           const persona = {
+            id: p.ID_PERSONA || null,
             nombre: p.NOMBRE || p.NOMBRE_COMPLETO || p.nombre || "—",
             tel: p.TELEFONO || p.TEL || p.tel || "",
             casilla: p.CASILLA || p.casilla || "",
-            rol: tipoRaw, // se usa en el panel
+            domicilio: p.DOMICILIO || p.domicilio || "",
+            rol: tipoRaw,
+            lat,
+            lng,
+            _raw: p,
           };
 
           if (!m.has(sec)) {
@@ -1122,7 +1258,6 @@
           }
           const b = m.get(sec);
 
-          // 🎯 Equivalencias de roles
           if (
             tipoRaw === "REP_CASILLA" ||
             tipoRaw === "REPRESENTANTE DE CASILLA"
@@ -1134,7 +1269,6 @@
             tipoRaw === "REPRESENTANTE DE SECCIÓN" ||
             tipoRaw === "REPRESENTANTE GENERAL"
           ) {
-            // 👆 REP_GENERAL lo tratamos como representante de sección
             b.rep_seccion.push(persona);
           } else if (
             tipoRaw === "COORDINADOR_DISTRITAL" ||
@@ -1142,47 +1276,63 @@
           ) {
             b.coord_distrito.push(persona);
           } else {
-            // SIMPATIZANTE, LIDER, OBSERVADOR, ADVERSARIO, etc.
             b.otros.push(persona);
           }
         });
+
         return m;
       }
 
       // Carga índices una vez
       async function ensureETIndexes() {
         const paths = JSON.parse(localStorage.getItem("AT_PATHS") || "{}");
+
+        // 1) Casillas por sección
         if (!__ET_CAS_POR_SEC) {
           const cas = await fetchJSON(URL_CASSEC);
           __ET_CAS_POR_SEC = bySecMapFromCasillas(cas);
         }
+
+        // 2) Índice de secciones
         if (!__SECC_INDEX) {
           const secc = await fetchJSON(URL_SECC);
           __SECC_INDEX = indexSecciones(secc);
         }
-        if (URL_ETPTS && !__ET_PERS_INDEX) {
-          try {
-            const pts = await fetchJSON(URL_ETPTS);
-            __ET_PERS_INDEX = bucketPersonasET(pts);
-          } catch (_) {
-            __ET_PERS_INDEX = new Map();
-          }
-        }
 
-        if (!window.__ET_PERS_INDEX && paths.et27) {
+        // 3) Personas ET (puntos de campo)
+        const ptsUrl = getET27PointsURL();
+
+        // Si aún no hay índice ni global ni local, cargar desde el GeoJSON
+        if (ptsUrl && !window.__ET_PERS_INDEX && !__ET_PERS_INDEX) {
           try {
-            const pts = await fetch(paths.et27, { cache: "no-store" }).then(
-              (r) => r.json()
-            );
-            window.__ET_PERS_INDEX = bucketPersonasET(pts); // Map<secId, Persona[]>
+            const pts = await fetchJSON(ptsUrl);
+            __ET_PERS_INDEX = bucketPersonasET(pts); // Map<secId, bucket>
+            window.__ET_PERS_INDEX = __ET_PERS_INDEX;
             console.log(
-              "[ET] personas ET cargadas:",
-              window.__ET_PERS_INDEX.size
+              "[ET] Personas ET cargadas desde",
+              ptsUrl,
+              ":",
+              __ET_PERS_INDEX.size
             );
           } catch (err) {
             console.warn("[ET] No se pudieron cargar puntos ET27:", err);
-            window.__ET_PERS_INDEX = new Map();
+            __ET_PERS_INDEX = new Map();
+            window.__ET_PERS_INDEX = __ET_PERS_INDEX;
           }
+        }
+
+        // Si existe solo uno de los dos, sincronizarlos
+        if (!__ET_PERS_INDEX && window.__ET_PERS_INDEX) {
+          __ET_PERS_INDEX = window.__ET_PERS_INDEX;
+        }
+        if (!window.__ET_PERS_INDEX && __ET_PERS_INDEX) {
+          window.__ET_PERS_INDEX = __ET_PERS_INDEX;
+        }
+
+        // Último recurso: si siguen siendo null, crea un Map vacío
+        if (!__ET_PERS_INDEX) {
+          __ET_PERS_INDEX = new Map();
+          window.__ET_PERS_INDEX = __ET_PERS_INDEX;
         }
       }
 
@@ -1197,16 +1347,18 @@
       function computeSectionStats(secId) {
         const sec = String(secId);
 
-        // Casillas y meta por sección (vienen del CSV de casillas_sec)
+        // Casillas y meta por sección
         const cas = __ET_CAS_POR_SEC.get(sec) || { req_rep: 0, casillas: [] };
 
-        // Personas ET (vienen de puntos_campo.geojson ya bucketizadas)
-        const per = (__ET_PERS_INDEX && __ET_PERS_INDEX.get(sec)) || {
-          rep_casilla: [],
-          rep_seccion: [],
-          coord_distrito: [],
-          otros: [],
-        };
+        // Personas ET (preferir siempre el índice global)
+        const per = (window.__ET_PERS_INDEX &&
+          window.__ET_PERS_INDEX.get(sec)) ||
+          (__ET_PERS_INDEX && __ET_PERS_INDEX.get(sec)) || {
+            rep_casilla: [],
+            rep_seccion: [],
+            coord_distrito: [],
+            otros: [],
+          };
 
         // Conteo directo por casilla SOLO para quienes ya traen CASILLA capturada
         const repCasByCas = new Map();
@@ -1254,6 +1406,7 @@
         const $tools = document.querySelector(
           "#et27-tab-casillas .et27-cas-tools"
         );
+        const S = computeSectionStats(secId);
         const $search = document.getElementById("et27-cas-search");
         const $sort = document.getElementById("et27-cas-sort");
         const $miss = document.getElementById("et27-cas-missing");
@@ -1288,25 +1441,43 @@
         $ot.innerHTML = "";
 
         // helper para crear una fila editable
+        // helper para crear una fila editable
         function makeEditableRow(p) {
           const li = document.createElement("li");
           li.className = "pers-item";
 
+          const raw = p._raw || {};
+
           // ID estable (si no viene del geojson, generamos uno)
           const pid =
             p.id ||
-            p.ID_PERSONA ||
-            `${secId}_${p.CASILLA || ""}_${(p.NOMBRE || "").slice(
-              0,
-              10
-            )}_${Math.random().toString(36).slice(2, 6)}`;
-          li.dataset.pid = pid;
+            raw.ID_PERSONA ||
+            raw.ID ||
+            p._pid ||
+            `${secId}_${(p.casilla || raw.CASILLA || "").toString()}_${(
+              p.nombre ||
+              raw.NOMBRE ||
+              raw.NOMBRE_COMPLETO ||
+              ""
+            )
+              .slice(0, 10)
+              .replace(/\s+/g, "_")}_${Math.random().toString(36).slice(2, 6)}`;
 
-          const nombre = p.NOMBRE || p.NOMBRE_COMPLETO || "";
-          const tel = p.TELEFONO || p.TEL || "";
-          const casilla = p.CASILLA || "";
-          const rolRaw = (p.TIPO_ASIGNACION || p.ROL || "").toUpperCase();
-          const domicilio = p.DOMICILIO || p.domicilio || "";
+          li.dataset.pid = pid;
+          p.id = pid;
+          p._pid = pid;
+
+          const nombre = p.nombre || raw.NOMBRE || raw.NOMBRE_COMPLETO || "";
+          const tel = p.tel || raw.TELEFONO || raw.TEL || "";
+          const casilla = p.casilla || raw.CASILLA || "";
+          const rolRaw = (
+            p.rol ||
+            raw.TIPO_ASIGNACION ||
+            raw.ROL ||
+            raw.TIPO ||
+            ""
+          ).toUpperCase();
+          const domicilio = p.domicilio || raw.DOMICILIO || "";
 
           li.innerHTML = `
           <div class="pers-main">
@@ -1337,7 +1508,7 @@
             </select>
             <button type="button" class="pers-map-btn">📍Mapa</button>
           </div>
-  `;
+          `;
 
           const nomInput = li.querySelector(".pers-nom");
           const telInput = li.querySelector(".pers-tel");
@@ -1379,44 +1550,82 @@
             });
           }
 
+          // Clic en la fila => centrar / resaltar en el mapa
+          li.addEventListener("click", (ev) => {
+            const t = ev.target;
+            // No interceptar clics en inputs o select o botón mapa
+            if (
+              t.classList.contains("pers-nom") ||
+              t.classList.contains("pers-tel") ||
+              t.classList.contains("pers-dom") ||
+              t.classList.contains("pers-cas") ||
+              t.tagName === "SELECT" ||
+              t.classList.contains("pers-map-btn")
+            ) {
+              return;
+            }
+            focusET27Person(pid, secId, li);
+          });
+
           return li;
         }
 
         // 3) 👉 AQUÍ va el bloque del forEach
+        // === BLOQUE PERSONAS ET-27 EN EL PANEL DE SECCIÓN ===
+
+        // 1) Obtener personas de esta sección desde el índice global
+
+        // 2) Limpiar las listas del panel
+        [$rc, $rs, $cd, $ot].forEach((ul) => (ul.innerHTML = ""));
+
+        // 3) Buckets por rol
+        const roles = {
+          rep_casilla: [],
+          rep_seccion: [],
+          coord_distrito: [],
+          otros: [],
+        };
+
+        // 3) Pintar personas sin tocar el índice global (evitamos duplicados)
         personas.forEach((p) => {
           const li = makeEditableRow(p);
-          const rol = (p.TIPO_ASIGNACION || p.ROL || "").toUpperCase();
-          // --- Bucket real de esta sección en memoria (para que cuente en estadísticas) ---
-          const secKey = String(secId);
-          let bucket = __ET_PERS_INDEX && __ET_PERS_INDEX.get(secKey);
-          if (!bucket) {
-            bucket = {
-              rep_casilla: [],
-              rep_seccion: [],
-              coord_distrito: [],
-              otros: [],
-            };
-            if (!window.__ET_PERS_INDEX) {
-              window.__ET_PERS_INDEX = new Map();
-            }
-            __ET_PERS_INDEX.set(secKey, bucket);
-          }
 
-          if (rol === "REP_CASILLA") {
+          const rol = (p.rol || p.TIPO_ASIGNACION || p.ROL || "").toUpperCase();
+
+          if (rol.includes("CASILLA")) {
             $rc.appendChild(li);
-          } else if (rol === "REP_SECCION") {
+          } else if (rol.includes("SECCION") || rol.includes("GENERAL")) {
             $rs.appendChild(li);
-          } else if (rol === "COORDINADOR_DISTRITAL") {
+          } else if (rol.includes("COORD")) {
             $cd.appendChild(li);
           } else {
             $ot.appendChild(li);
           }
         });
 
+        // 5) Pintar en el panel usando filas editables
+        roles.rep_casilla.forEach((p) =>
+          $rc.appendChild(makeEditableRow(p, secId))
+        );
+        roles.rep_seccion.forEach((p) =>
+          $rs.appendChild(makeEditableRow(p, secId))
+        );
+        roles.coord_distrito.forEach((p) =>
+          $cd.appendChild(makeEditableRow(p, secId))
+        );
+        roles.otros.forEach((p) => $ot.appendChild(makeEditableRow(p, secId)));
+
+        // === FIN BLOQUE PERSONAS ET-27 ===
+
         function crearPersona(tipo) {
           // Recuperar el bucket real de esta sección
           const secKey = String(secId);
-          let bucket = __ET_PERS_INDEX && __ET_PERS_INDEX.get(secKey);
+
+          // Intentar leer primero del índice global y luego del local
+          let bucket =
+            (window.__ET_PERS_INDEX && window.__ET_PERS_INDEX.get(secKey)) ||
+            (__ET_PERS_INDEX && __ET_PERS_INDEX.get(secKey));
+
           if (!bucket) {
             bucket = {
               rep_casilla: [],
@@ -1424,10 +1633,15 @@
               coord_distrito: [],
               otros: [],
             };
+
             if (!window.__ET_PERS_INDEX) {
               window.__ET_PERS_INDEX = new Map();
             }
-            __ET_PERS_INDEX.set(secKey, bucket);
+            if (!__ET_PERS_INDEX) {
+              __ET_PERS_INDEX = window.__ET_PERS_INDEX;
+            }
+
+            window.__ET_PERS_INDEX.set(secKey, bucket);
           }
 
           // Generar ID estable para esta persona nueva
@@ -1525,8 +1739,6 @@
         const muni = feat?.properties?.MUNICIPIO ?? "—";
         const dl = feat?.properties?.DISTRITO_L ?? feat?.properties?.DL ?? "—";
 
-        const S = computeSectionStats(secId);
-
         $ttl.textContent = `Sección ${secId} · DL ${dl} · ${muni}`;
         $req.textContent = `${S.reqRepCasillas}`;
         $asg.textContent = `${S.asigRepCasillas}`;
@@ -1615,35 +1827,6 @@
           $ulc.appendChild(li);
         });
 
-        // Personas por rol
-        function paintList(el, arr) {
-          el.innerHTML = "";
-          if (!arr || !arr.length) {
-            el.innerHTML = `<li style="color:#64748b;font-size:12px">— Sin registros —</li>`;
-            return;
-          }
-          arr.forEach((p) => {
-            const li = document.createElement("li");
-            li.innerHTML = `<div style="padding:6px 0;border-bottom:1px dashed #eef">
-                    <div><b>${p.nombre}</b>${
-              p.casilla ? ` · Casilla ${p.casilla}` : ""
-            }</div>
-                    <div style="font-size:12px;color:#475569">${
-                      p.tel ? `Tel: ${p.tel}` : ""
-                    }</div>
-                  </div>`;
-            el.appendChild(li);
-          });
-        }
-        paintList($rc, __ET_PERS_INDEX?.get(String(secId))?.rep_casilla || []);
-        paintList($rs, __ET_PERS_INDEX?.get(String(secId))?.rep_seccion || []);
-        paintList(
-          $cd,
-          __ET_PERS_INDEX?.get(String(secId))?.coord_distrito || []
-        );
-        paintList($ot, __ET_PERS_INDEX?.get(String(secId))?.otros || []);
-
-        // Resumen
         const faltCas = Math.max(0, 2 * S.casillas.length - S.asigRepCasillas);
         const faltRepSec = Math.max(0, 2 - S.repSecion);
         const faltCoord = Math.max(0, 1 - S.coordDistrital);
