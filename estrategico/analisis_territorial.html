@@ -415,6 +415,24 @@
         .hist-panel .grid {
           grid-template-columns: 1fr;
         }
+        .hist-panel {
+          position: fixed;
+          inset: 12px;
+          width: auto;
+          max-height: none;
+          resize: none;
+        }
+        #hist-panel .body {
+          height: calc(100% - 56px);
+          overflow-y: auto;
+          -webkit-overflow-scrolling: touch;
+        }
+        #hist-panel .card {
+          height: auto;
+        }
+        #hist-panel .card canvas {
+          height: 220px !important;
+        }
       }
 
       /* El panel no debe crecer más que la ventana */
@@ -1227,8 +1245,11 @@
 
         // Bloquear propagación al mapa (no “parpadea” al arrastrar)
         if (window.L && L.DomEvent) {
+          const isTouch = window.matchMedia && window.matchMedia("(pointer: coarse)").matches;
           L.DomEvent.disableClickPropagation(box);
-          L.DomEvent.disableScrollPropagation(box);
+          if (!isTouch) {
+            L.DomEvent.disableScrollPropagation(box);
+          }
         }
 
         // Drag del panel
