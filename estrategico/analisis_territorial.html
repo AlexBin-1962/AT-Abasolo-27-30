@@ -231,7 +231,7 @@
         cursor: pointer;
         border: 1px solid var(--rail-br);
         background: #fff;
-        color: var(--fg);
+        color: #607d8b;
         display: grid;
         place-items: center;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
@@ -251,40 +251,6 @@
         width: 22px;
         height: 22px;
       }
-
-      .tool[data-tool="ganador"].active {
-        background: var(--blue-bg);
-        border-color: var(--blue);
-        color: var(--blue);
-      }
-
-      .tool[data-tooltip] {
-        position: relative;
-      }
-      .tool[data-tooltip]::after {
-        content: attr(data-tooltip);
-        position: absolute;
-        right: 110%;
-        top: 50%;
-        transform: translateY(-50%);
-        background: #000;
-        color: #fff;
-        font-size: 12px;
-        padding: 0.25rem 0.5rem;
-        border-radius: 6px;
-        opacity: 0;
-        pointer-events: none;
-        white-space: nowrap;
-        transition: opacity 0.15s;
-      }
-      .tool:hover::after {
-        opacity: 0.9;
-      }
-
-      /* 1) Colores correctos en los iconos (svg) */
-      .tool {
-        color: #607d8b;
-      } /* gris base */
       .tool svg,
       .tool svg path,
       .tool svg use {
@@ -292,18 +258,12 @@
         stroke: none;
       }
 
-      .tool.active {
-        background: #ffebee; /* rosa tenue */
-        border-color: #e91e63;
-        color: #e91e63;
-      }
       .tool[data-tool="ganador"].active {
-        background: #e3f2fd; /* azul tenue */
-        border-color: #2196f3;
-        color: #2196f3;
+        background: var(--blue-bg);
+        border-color: var(--blue);
+        color: var(--blue);
       }
 
-      /* 2) Tooltips sin “rayitas” fantasma */
       .tool[data-tooltip] {
         position: relative;
       }
@@ -413,7 +373,7 @@
           right: 4vw;
         }
         .hist-panel .grid {
-          grid-template-columns: 1fr;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .hist-panel {
           position: fixed;
@@ -433,34 +393,6 @@
         #hist-panel .card canvas {
           height: 220px !important;
         }
-      }
-
-      /* El panel no debe crecer más que la ventana */
-      #hist-panel {
-        max-height: calc(100vh - 120px);
-        overflow: hidden;
-      }
-
-      /* El área interna sí scrollea si hace falta */
-      #hist-panel .body {
-        max-height: calc(100vh - 170px);
-        overflow: auto;
-      }
-
-      /* Cada tarjeta con alto estable */
-      #hist-panel .card {
-        height: 300px; /* ajusta 260–320 a tu gusto */
-        display: flex;
-        flex-direction: column;
-      }
-
-      /* El canvas ocupa el alto de la tarjeta (evita reflow infinito) */
-      #hist-panel .card canvas {
-        flex: 1;
-        min-height: 240px; /* altura mínima útil */
-        height: 240px !important; /* forzamos altura */
-        width: 100% !important;
-        display: block;
       }
 
       /* Controles del header del historial */
@@ -522,6 +454,18 @@
         height: 240px !important;
         width: 100% !important;
         display: block;
+      }
+
+      @media (max-width: 720px) {
+        .hist-panel .grid {
+          grid-template-columns: 1fr;
+        }
+        #hist-panel .card {
+          height: auto !important;
+        }
+        #hist-panel .card canvas {
+          height: 220px !important;
+        }
       }
 
       /* Barra superior */
@@ -682,17 +626,6 @@
       }
       .bad-msg {
         color: #b71c1c;
-      }
-
-      /* Apila con espacio las tarjetas internas del QA */
-      #hist-qa {
-        display: flex;
-        flex-direction: column;
-        gap: 12px; /* separa “Fuente interna” y “Externo” */
-      }
-      #hist-qa .card {
-        position: static; /* por si alguna card heredó posicionamiento raro */
-        margin: 0; /* evita márgenes que se colapsen */
       }
 
       /* QA: apila tarjetas en columna con espacio */

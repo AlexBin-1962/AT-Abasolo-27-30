@@ -189,6 +189,8 @@
         padding: 10px 12px;
         border-bottom: 1px solid #f1f5f9;
         background: linear-gradient(180deg, #f8fafc, #eef2f7);
+        cursor: move;
+        user-select: none;
       }
       #et27-sec-panel .hdr .ttl {
         font-weight: 700;
@@ -203,18 +205,6 @@
         font-size: 16px;
         cursor: pointer;
       }
-
-      /* Drag en header */
-      #et27-sec-panel .hdr {
-        cursor: move;
-        user-select: none;
-      }
-
-      /* Botón cerrar no arrastra */
-      #et27-sec-panel .hdr .x {
-        cursor: pointer;
-      }
-
       #et27-sec-panel .et27-resizer-br {
         cursor: se-resize;
       }
@@ -283,11 +273,13 @@
       }
       .cas-item {
         border: 1px solid #eef;
-        border-radius: 10px;
-        padding: 8px 10px;
-        display: flex;
+        border-radius: 12px;
+        padding: 10px 12px;
+        display: grid;
+        grid-template-columns: 1fr auto;
         justify-content: space-between;
-        gap: 8px;
+        gap: 10px;
+        background: #fff;
       }
       .cas-meta {
         font-size: 12px;
@@ -299,7 +291,10 @@
       }
 
       .badge {
-        padding: 2px 8px;
+        align-self: center;
+        width: 48px;
+        text-align: center;
+        padding: 4px 0;
         border-radius: 10px;
         font-size: 12px;
         font-weight: 700;
@@ -612,15 +607,13 @@
         position: relative;
       } /* contenedor del buscador */
       #sec-suggest {
-        z-index: 3000;
-      }
-      #sec-suggest {
         position: absolute;
         left: 12px;
         right: 12px;
         top: 46px; /* ajusta según tu input */
         max-height: 220px;
         overflow: auto;
+        z-index: 3000;
       }
       /* la lista queda clickeable */
 
@@ -653,15 +646,6 @@
       }
 
       /* Tarjetas de casillas */
-      .cas-item {
-        border: 1px solid #eef;
-        border-radius: 12px;
-        padding: 10px 12px;
-        display: grid;
-        grid-template-columns: 1fr auto;
-        gap: 10px;
-        background: #fff;
-      }
       .cas-item .cas-head {
         font-weight: 700;
         margin-bottom: 4px;
@@ -669,12 +653,6 @@
       .cas-item .cas-meta {
         font-size: 12px;
         color: #475569;
-      }
-      .badge {
-        align-self: center;
-        width: 48px;
-        text-align: center;
-        padding: 4px 0;
       }
 
       /* Botón copiar */
