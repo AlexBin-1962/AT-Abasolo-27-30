@@ -789,7 +789,7 @@ body, html { overflow-x: hidden; }
 
           <!-- Checkbox: Estado completo -->
           <div class="row span12">
-            <label><input type="checkbox" id="all-state"/> Estado completo (todas las secciones)</label>
+            <label><input type="checkbox" id="all-state"/> Seleccionar Abasolo (secciones)</label>
             <div class="hint">Ignora Municipio/DF/DL y muestra todas las secciones del estado.</div>
           </div>
 
@@ -801,7 +801,7 @@ body, html { overflow-x: hidden; }
           <!-- Inputs: Rutas de archivos -->
           <div class="row span6">
             <label>GeoJSON</label>
-            <input id="geo" value="data/geo/secciones.geojson"/>
+            <input id="geo" value="data/geo/secciones_abasolo.geojson"/>
           </div>
           <div class="row span6">
             <label>Catálogo territorial (nombres)</label>
@@ -889,7 +889,26 @@ body, html { overflow-x: hidden; }
         fetch("data/catalogo_territorial.json")
           .then(response => response.json())
           .then(data => {
-            cargarMunicipios(data.municipios); // Llena el select de municipios
+            const SOLO_MUN = "ABASOLO";
+
+        // 1) Filtrar catálogo a solo Abasolo
+        const municipiosAbasolo = (data.municipios || []).filter(m => {
+          const nombre = String(m.nombre ?? m.NOMBRE ?? m.municipio ?? m.MUNICIPIO ?? "").toUpperCase().trim();
+          return nombre === SOLO_MUN;
+        });
+
+        cargarMunicipios(municipiosAbasolo);
+
+        // 2) Seleccionar Abasolo automáticamente y bloquear el select (opcional)
+        const selMun = document.getElementById("sel-mun");
+        if (selMun) {
+          // si tus options usan value = clave o nombre, esto lo intentamos con ambas
+          const opt = [...selMun.options].find(o => String(o.textContent).toUpperCase().includes(SOLO_MUN) || String(o.value).toUpperCase().includes(SOLO_MUN));
+          if (opt) selMun.value = opt.value;
+
+          selMun.disabled = true; // 👈 opcional: para que no cambien de municipio
+        }
+        // Llena el select de municipios
             cargarDistritos("sel-df", data.distritos_federales); // Llena el select de DF
             cargarDistritos("sel-dl", data.distritos_locales); // Llena el select de DL
           })
@@ -1004,7 +1023,8 @@ body, html { overflow-x: hidden; }
   function persistir(u){
     // Defaults de producción (tu nueva estructura):
     const defaults = {
-      geo: 'data/geo/secciones.geojson',
+      geo: 'data/geo/secciones_abasolo.geojson',
+
       catalog: 'data/catalogo_territorial.json',
       electoral: {
         P:  'data/electoral/P.json',
